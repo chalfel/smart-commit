@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -30,7 +31,7 @@ func main() {
 	}
 
 	fmt.Println("Generating commit message with Copilot CLI...")
-	prompt := fmt.Sprintf("Generate a concise git commit message for these changes: %s", changes)
+	prompt := fmt.Sprintf("Generate a concise git commit message following conventional commit format (type(scope): description) for these changes. Use types like feat, fix, docs, style, refactor, test, chore. The changes are: %s", changes)
 
 	var commitMsg string
 	// Try using gh copilot suggest
@@ -39,8 +40,11 @@ func main() {
 		fmt.Printf("GitHub Copilot CLI error: %v\n", err)
 		// Fallback to a basic message
 		changedFiles := extractChangedFiles(changes)
-		commitMsg = fmt.Sprintf("WIP: Changes to %s", strings.Join(changedFiles[:min(len(changedFiles), 5)], ", "))
+		commitMsg = fmt.Sprintf("chore: changes to %s", strings.Join(changedFiles[:min(len(changedFiles), 5)], ", "))
 	}
+
+	// Validate and enforce conventional commit format
+	commitMsg = enforceConventionalCommit(commitMsg, changes)
 
 	// Commit with the generated message
 	fmt.Printf("Committing with message: %s\n", commitMsg)
@@ -57,6 +61,60 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("Changes pushed successfully!")
+}
+
+// enforceConventionalCommit ensures the message follows conventional commit format
+func enforceConventionalCommit(message string, changes string) string {
+	// Regular expression for conventional commit format
+	conventionalFormat := regexp.MustCompile(`^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\([a-z0-9-]+\))?: .+`)
+
+	// If message already follows the format, return it
+	if conventionalFormat.MatchString(message) {
+		return message
+	}
+
+	// Otherwise, try to determine the appropriate type from the changes
+	commitType := determineCommitType(changes)
+
+	// Extract first sentence to use as description
+	description := message
+	if idx := strings.Index(message, "."); idx > 0 {
+		description = message[:idx]
+	}
+	description = strings.TrimSpace(description)
+
+	// First letter should be lowercase
+	if len(description) > 0 {
+		description = strings.ToLower(description[:1]) + description[1:]
+	}
+
+	return fmt.Sprintf("%s: %s", commitType, description)
+}
+
+// determineCommitType tries to determine an appropriate commit type based on changes
+func determineCommitType(changes string) string {
+	lowerChanges := strings.ToLower(changes)
+
+	// Default type
+	commitType := "chore"
+
+	// Try to determine type based on file patterns and change descriptions
+	if strings.Contains(lowerChanges, "test") || strings.Contains(lowerChanges, "_test.go") {
+		commitType = "test"
+	} else if strings.Contains(lowerChanges, "fix") || strings.Contains(lowerChanges, "bug") {
+		commitType = "fix"
+	} else if strings.Contains(lowerChanges, "feat") || strings.Contains(lowerChanges, "add") ||
+		strings.Contains(lowerChanges, "new") {
+		commitType = "feat"
+	} else if strings.Contains(lowerChanges, "doc") || strings.Contains(lowerChanges, "readme") {
+		commitType = "docs"
+	} else if strings.Contains(lowerChanges, "refactor") {
+		commitType = "refactor"
+	} else if strings.Contains(lowerChanges, "style") || strings.Contains(lowerChanges, "format") {
+		commitType = "style"
+	}
+
+	return commitType
 }
 
 // checkCopilotCLI verifies that the GitHub Copilot CLI is installed
